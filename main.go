@@ -32,5 +32,19 @@ func main() {
 		},
 	)
 
+	router.POST(
+		"/generate-classes",
+		func(c *gin.Context) {
+			helpers.GenerateClasses(c, dynamoClient)
+		},
+	)
+
+	router.POST(
+		"/add-values",
+		func(c *gin.Context) {
+			helpers.AddValues(c, dynamoClient)
+		},
+	)
+
 	router.Run()
 }

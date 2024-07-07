@@ -5,6 +5,8 @@ go 1.22.5
 require gorm.io/gorm v1.25.10
 
 require (
+	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.14.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.22.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/klauspost/compress v1.13.6 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
