@@ -60,7 +60,10 @@ type GenerateClassesRequest struct {
 	Params Params `json:"params"`
 }
 type Params struct {
-	Blocks   []string `json:"blocks"`
-	Branches []string `json:"branches"`
-	Years    []int    `json:"years"`
+	Blocks                 []string `json:"blocks"`
+	Branches               []string `json:"branches"`
+	Years                  []int    `json:"years"`
+	SingleChild            bool     `json:"single_child"`
+	NumberOfBranchesInRoom int      `json:"number_of_branches"`
+	RoomTypes              []string `json:"room_types"`
 }

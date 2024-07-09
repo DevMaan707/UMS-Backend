@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/gin-gonic/gin"
 )
@@ -94,12 +95,18 @@ func ShuffleStudents(students []string) {
 	rand.Shuffle(len(students), func(i, j int) { students[i], students[j] = students[j], students[i] })
 }
 
-func generateExamAssignments(assignType string, classes []models.Class, rooms []models.Room) []map[string]interface{} {
+func Min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func generateExamAssignments(AssignType string, classes []models.Class, rooms []models.Room, params models.Params) []map[string]interface{} {
 	assignments := make([]map[string]interface{}, 0)
 	roomIndex := 0
 
 	remainingStudents := make(map[string][]string)
-
 	for _, class := range classes {
 		remainingStudents[class.ClassName] = class.StudentIDs
 	}
@@ -113,18 +120,22 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 		allocatedBranches := []string{}
 		roomCapacity := rooms[roomIndex].Capacity
 
+		if rooms[roomIndex].RoomType == "classroom" && params.SingleChild {
+			roomCapacity /= 2
+		}
+
 		for class := range remainingStudents {
 			ShuffleStudents(remainingStudents[class])
 		}
 
 		for _, class := range classes {
 			if len(remainingStudents[class.ClassName]) > 0 {
-				numToAllocate := min(len(remainingStudents[class.ClassName]), roomCapacity/2)
+				numToAllocate := min(len(remainingStudents[class.ClassName]), roomCapacity/params.NumberOfBranchesInRoom)
 				roomsCapacity[roomIndex] = append(roomsCapacity[roomIndex], remainingStudents[class.ClassName][:numToAllocate]...)
 				remainingStudents[class.ClassName] = remainingStudents[class.ClassName][numToAllocate:]
 				roomCapacity -= numToAllocate
 				allocatedBranches = append(allocatedBranches, class.Branch)
-				if len(allocatedBranches) >= 2 {
+				if len(allocatedBranches) >= params.NumberOfBranchesInRoom {
 					break
 				}
 			}
@@ -158,38 +169,83 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 	return assignments
 }
 
-func fetchClassesFromDB(dynamoClient *dynamodb.Client, branches []string, years []int) ([]models.Class, error) {
+func FetchClassesFromDB(dynamoClient *dynamodb.Client, branches []string, years []int) ([]models.Class, error) {
+
 	var classes []models.Class
-	// Add code to fetch from DynamoDB here
+	for _, branch := range branches {
+		for _, year := range years {
+
+			input := &dynamodb.ScanInput{
+				TableName:        aws.String("Classes"),
+				FilterExpression: aws.String("Branch = :branch AND Year = :year"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":branch": &types.AttributeValueMemberS{Value: branch},
+					":year":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", year)},
+				},
+			}
+
+			result, err := dynamoClient.Scan(context.TODO(), input)
+			if err != nil {
+				return nil, err
+			}
+			var fetchedClasses []models.Class
+			err = attributevalue.UnmarshalListOfMaps(result.Items, &fetchedClasses)
+			if err != nil {
+				return nil, err
+			}
+			classes = append(classes, fetchedClasses...)
+		}
+	}
 	return classes, nil
 }
 
-func fetchRoomsFromDB(dynamoClient *dynamodb.Client, years []int) ([]models.Room, error) {
+func FetchRoomsFromDB(dynamoClient *dynamodb.Client, params models.Params) ([]models.Room, error) {
 	var rooms []models.Room
-	// Add code to fetch from DynamoDB here
+	for _, block := range params.Blocks {
+		for _, roomType := range params.RoomTypes {
+			input := &dynamodb.ScanInput{
+				TableName:        aws.String("Rooms"),
+				FilterExpression: aws.String("Block = :block AND RoomType = :roomType"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":block":    &types.AttributeValueMemberS{Value: block},
+					":roomType": &types.AttributeValueMemberS{Value: roomType},
+				},
+			}
+			result, err := dynamoClient.Scan(context.TODO(), input)
+			if err != nil {
+				return nil, err
+			}
+			var fetchedRooms []models.Room
+			err = attributevalue.UnmarshalListOfMaps(result.Items, &fetchedRooms)
+			if err != nil {
+				return nil, err
+			}
+			rooms = append(rooms, fetchedRooms...)
+		}
+	}
 	return rooms, nil
 }
 
-func generateClassesHandler(c *gin.Context, dynamoClient *dynamodb.Client) {
+func GenerateClassesHandler(c *gin.Context, dynamoClient *dynamodb.Client) {
 	var req models.GenerateClassesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	classes, err := fetchClassesFromDB(dynamoClient, req.Params.Branches, req.Params.Years)
+	classes, err := FetchClassesFromDB(dynamoClient, req.Params.Branches, req.Params.Years)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	rooms, err := fetchRoomsFromDB(dynamoClient, req.Params.Years)
+	rooms, err := FetchRoomsFromDB(dynamoClient, req.Params)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	assignments := generateExamAssignments(req.Type, classes, rooms)
+	assignments := generateExamAssignments(req.Type, classes, rooms, req.Params)
 	c.JSON(200, assignments)
 }
 
@@ -211,10 +267,6 @@ func createTable(svc *dynamodb.Client, tableName string, keySchema []types.KeySc
 	}
 
 	fmt.Printf("Created the table %s successfully\n", tableName)
-}
-
-func GenerateClasses(c *gin.Context, dynamoClient *dynamodb.Client) {
-
 }
 
 func AddValues(c *gin.Context, svc *dynamodb.Client) {
