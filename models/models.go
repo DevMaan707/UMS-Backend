@@ -18,6 +18,19 @@ type Class struct {
 	Branch       string         `json:"branch"`
 }
 
+type Item struct {
+	ID           int      `json:"id"`
+	ClassName    string   `json:"class_name,omitempty"`
+	StudentIDs   []string `json:"student_ids,omitempty"`
+	Year         int      `json:"year,omitempty"`
+	DetainedList []string `json:"detained_list,omitempty"`
+	Branch       string   `json:"branch,omitempty"`
+	RoomNumber   string   `json:"room_number,omitempty"`
+	Capacity     int      `json:"capacity,omitempty"`
+	Block        string   `json:"block,omitempty"`
+	RoomType     string   `json:"room_type,omitempty"`
+}
+
 type Room struct {
 	ID            uint `gorm:"primaryKey"`
 	CreatedAt     time.Time
@@ -27,6 +40,7 @@ type Room struct {
 	Capacity      int            `json:"capacity"`
 	RoomNumber    string         `json:"room_number"`
 	RoomTimetable string         `json:"room_timetable"`
+	ClassAssigned string         `json:"class_assigned"`
 }
 
 type Assigned struct {
