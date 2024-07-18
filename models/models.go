@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"gorm.io/gorm"
 )
 
@@ -80,4 +81,24 @@ type Params struct {
 	SingleChild            bool     `json:"single_child"`
 	NumberOfBranchesInRoom int      `json:"number_of_branches"`
 	RoomTypes              []string `json:"room_types"`
+}
+
+type Details struct {
+	Block         string `json:"block"`
+	RoonType      string `json:"classroom"`
+	Day           int    `json:"day"`
+	HourSegment   int    `json:"hours"`
+	NumberofHours int    `json:"no_hours"`
+}
+
+type ColumnsData struct {
+	Columns map[string]string
+}
+
+type Received struct {
+	ID      primitive.ObjectID `bson:"_id"`
+	RoomNo  string             `bson:"Room_no"`
+	DayKey  int                `bson:"Day_key"`
+	DayTime string             `bson:"Day/Time"`
+	Columns ColumnsData        `bson:",inline"`
 }

@@ -4,6 +4,7 @@ import (
 	"DevMaan707/UMS/db"
 	helpers "DevMaan707/UMS/helpers"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,11 +13,11 @@ import (
 func main() {
 
 	dynamoClient := db.ConnectDynamoDB()
-	//mongoClient, err := db.ConnectMongoDB()
+	mongoClient, err := db.ConnectMongoDB()
 
-	// if err != nil {
-	// 	log.Fatal("Error occurred while connecting to MongoDB")
-	// }
+	if err != nil {
+		slog.Error("Error occurred while connecting to MongoDB")
+	}
 	router := gin.Default()
 
 	router.GET("/test", func(c *gin.Context) {
@@ -42,6 +43,12 @@ func main() {
 		"/add-values",
 		func(c *gin.Context) {
 			helpers.AddValues(c, dynamoClient)
+		},
+	)
+
+	router.POST(
+		"/empty-class-generator", func(c *gin.Context) {
+			helpers.EmptyClassGen(c, mongoClient)
 		},
 	)
 
