@@ -234,10 +234,10 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 	assignments := make([]map[string]interface{}, 0)
 	roomIndex := 0
 
-	// Map to hold remaining students per class
+	// Map to hold remaining students per branch
 	remainingStudents := make(map[string][]string)
 	for _, class := range classes {
-		remainingStudents[class.ClassName] = class.StudentIDs
+		remainingStudents[class.Branch] = append(remainingStudents[class.Branch], class.StudentIDs...)
 	}
 
 	// Array to hold assigned students for each room
@@ -253,25 +253,24 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 		}
 
 		allocatedBranches := make(map[string]bool)
+		studentsPerBranch := roomCapacity / params.NumberOfBranchesInRoom
 
-		for roomCapacity > 0 && len(allocatedBranches) < params.NumberOfBranchesInRoom {
-			for _, class := range classes {
-				if len(remainingStudents[class.ClassName]) == 0 {
-					continue
-				}
-
-				if _, found := allocatedBranches[class.Branch]; !found {
-					numToAllocate := min(len(remainingStudents[class.ClassName]), roomCapacity)
-					roomsCapacity[roomIndex] = append(roomsCapacity[roomIndex], remainingStudents[class.ClassName][:numToAllocate]...)
-					remainingStudents[class.ClassName] = remainingStudents[class.ClassName][numToAllocate:]
-					roomCapacity -= numToAllocate
-
-					allocatedBranches[class.Branch] = true
-					if len(allocatedBranches) >= params.NumberOfBranchesInRoom {
-						break
-					}
-				}
+		for branch, students := range remainingStudents {
+			if roomCapacity == 0 {
+				break
 			}
+			if len(allocatedBranches) >= params.NumberOfBranchesInRoom {
+				break
+			}
+			if len(students) == 0 {
+				continue
+			}
+
+			numToAllocate := min(len(students), studentsPerBranch)
+			roomsCapacity[roomIndex] = append(roomsCapacity[roomIndex], students[:numToAllocate]...)
+			remainingStudents[branch] = students[numToAllocate:]
+			roomCapacity -= numToAllocate
+			allocatedBranches[branch] = true
 		}
 
 		roomIndex++
@@ -296,6 +295,7 @@ func min(a, b int) int {
 	}
 	return b
 }
+
 func FetchClassesFromDB(dynamoClient *dynamodb.Client, branches []string, years []int) ([]models.Class, error) {
 
 	slog.Info("In FetchClasses From DB")
