@@ -108,10 +108,12 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 	assignments := make([]map[string]interface{}, 0)
 	roomIndex := 0
 
+	// Ensure params.NumberOfBranchesInRoom is not zero to avoid division by zero
 	if params.NumberOfBranchesInRoom == 0 {
 		params.NumberOfBranchesInRoom = 1
 	}
 
+	// Map to hold remaining students per branch
 	remainingStudents := make(map[string][]string)
 	for _, class := range classes {
 		if contains(params.Branches, class.Branch) && containsInt(params.Years, class.Year) {
@@ -119,70 +121,68 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 		}
 	}
 
-	roomsCapacity := make([][]map[string]interface{}, len(rooms))
-
 	for roomIndex < len(rooms) {
 		room := rooms[roomIndex]
-		examCapacity := room.Capacity * 2 / 3
-		totalBenches := examCapacity / 2
-
-		if params.SingleChild {
-			totalBenches /= 2
-		}
-
-		allocatedBranches := make(map[string]bool)
-		studentsPerBranch := examCapacity / params.NumberOfBranchesInRoom
+		// Dynamically calculate the number of benches based on the room's original capacity
+		examCapacity := room.Capacity * 2 / 3 // Convert normal capacity (3 per bench) to exam capacity (2 per bench)
+		totalBenches := examCapacity / 2      // Each bench holds 2 students during exams
 
 		branchOrder := shuffleBranches(params.Branches)
 		if params.ShuffleYears && len(params.Years) > 1 {
 			branchOrder = shuffleBranchesWithYears(params.Branches, params.Years)
 		}
 
+		// Track current row and bench position
 		row, benchPosition := 1, 1
+		roomsCapacity := []map[string]interface{}{}
 
-		for _, branch := range branchOrder {
-			students := remainingStudents[branch]
+		// Allocate students in a round-robin fashion across branches
+		for totalBenches > 0 {
+			branchAllocated := false
 
-			if totalBenches == 0 || len(allocatedBranches) >= params.NumberOfBranchesInRoom {
-				break
-			}
-			if len(students) == 0 {
-				continue
-			}
+			for _, branch := range branchOrder {
+				if len(remainingStudents[branch]) == 0 {
+					continue
+				}
 
-			numToAllocate := Min(len(students), studentsPerBranch)
-			allocatedBranches[branch] = true
+				studentID := remainingStudents[branch][0]
+				remainingStudents[branch] = remainingStudents[branch][1:]
 
-			for i := 0; i < numToAllocate; i++ {
-				roomsCapacity[roomIndex] = append(roomsCapacity[roomIndex], map[string]interface{}{
-					"student_id": students[i],
+				roomsCapacity = append(roomsCapacity, map[string]interface{}{
+					"student_id": studentID,
 					"row":        row,
 					"bench":      benchPosition,
-					"column":     (benchPosition-1)%3 + 1,
+					"column":     (benchPosition-1)%3 + 1, // 3 benches in a row
 				})
 
-				if i%2 == 1 {
+				branchAllocated = true
+
+				// After seating 2 students per bench, move to the next bench
+				if len(roomsCapacity)%2 == 0 {
 					benchPosition++
 					if benchPosition > 3 {
 						benchPosition = 1
 						row++
 					}
+					totalBenches--
+				}
+
+				if totalBenches == 0 {
+					break
 				}
 			}
 
-			remainingStudents[branch] = students[numToAllocate:]
-			totalBenches -= numToAllocate / 2
+			// If no students were allocated, we are out of students to assign, so break out
+			if !branchAllocated {
+				break
+			}
 		}
 
-		if params.NumberOfBranchesInRoom > 1 {
-			fillBenchesWithDifferentBranches(roomsCapacity[roomIndex], params.NumberOfBranchesInRoom)
-		}
-
-		if len(roomsCapacity[roomIndex]) > 0 {
+		if len(roomsCapacity) > 0 {
 			assignments = append(assignments, map[string]interface{}{
 				"room_id":       room.ID,
 				"room_number":   room.RoomNumber,
-				"assigned_to":   roomsCapacity[roomIndex],
+				"assigned_to":   roomsCapacity,
 				"assigned_room": room.RoomNumber,
 			})
 		}
@@ -193,11 +193,20 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 	return assignments
 }
 
+// Ensure each bench has students from different branches
 func fillBenchesWithDifferentBranches(roomCapacity []map[string]interface{}, numberOfBranchesInRoom int) {
+	// Iterate through the room capacity, trying to ensure students from different branches are seated together
 	for i := 0; i < len(roomCapacity)-1; i += 2 {
-		if numberOfBranchesInRoom > 1 && roomCapacity[i]["student_id"].(string)[:6] == roomCapacity[i+1]["student_id"].(string)[:6] {
+		// Ensure students from different branches sit together on the same bench
+		branchA := roomCapacity[i]["student_id"].(string)[:6] // Extract branch identifier from the student ID
+		branchB := roomCapacity[i+1]["student_id"].(string)[:6]
+
+		// If two students on the same bench belong to the same branch, swap one with another from a different branch
+		if branchA == branchB {
 			for j := i + 2; j < len(roomCapacity); j++ {
-				if roomCapacity[i]["student_id"].(string)[:6] != roomCapacity[j]["student_id"].(string)[:6] {
+				branchJ := roomCapacity[j]["student_id"].(string)[:6]
+				// Find a student from a different branch and swap
+				if branchA != branchJ {
 					roomCapacity[i+1], roomCapacity[j] = roomCapacity[j], roomCapacity[i+1]
 					break
 				}
@@ -222,7 +231,9 @@ func shuffleBranches(branches []string) []string {
 	rand.Seed(time.Now().UnixNano())
 	shuffledBranches := make([]string, len(branches))
 	copy(shuffledBranches, branches)
-	rand.Shuffle(len(shuffledBranches), func(i, j int) { shuffledBranches[i], shuffledBranches[j] = shuffledBranches[j], shuffledBranches[i] })
+	rand.Shuffle(len(shuffledBranches), func(i, j int) {
+		shuffledBranches[i], shuffledBranches[j] = shuffledBranches[j], shuffledBranches[i]
+	})
 	return shuffledBranches
 }
 
