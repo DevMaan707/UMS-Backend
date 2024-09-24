@@ -127,57 +127,103 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 		examCapacity := room.Capacity * 2 / 3 // Convert normal capacity (3 per bench) to exam capacity (2 per bench)
 		totalBenches := examCapacity / 2      // Each bench holds 2 students during exams
 
-		branchOrder := shuffleBranches(params.Branches)
-		if params.ShuffleYears && len(params.Years) > 1 {
-			branchOrder = shuffleBranchesWithYears(params.Branches, params.Years)
-		}
-
-		// Track current row and bench position
-		row, benchPosition := 1, 1
 		roomsCapacity := []map[string]interface{}{}
 
-		// Allocate students in a round-robin fashion across branches
-		for totalBenches > 0 {
-			branchAllocated := false
+		if totalBenches == 0 {
+			roomIndex++
+			continue
+		}
 
-			for _, branch := range branchOrder {
-				if len(remainingStudents[branch]) == 0 {
+		// Case 1: Assign students sequentially from one branch per room
+		if params.NumberOfBranchesInRoom == 1 {
+			for branch, students := range remainingStudents {
+				if len(students) == 0 {
 					continue
 				}
 
-				studentID := remainingStudents[branch][0]
-				remainingStudents[branch] = remainingStudents[branch][1:]
-
-				roomsCapacity = append(roomsCapacity, map[string]interface{}{
-					"student_id": studentID,
-					"row":        row,
-					"bench":      benchPosition,
-					"column":     (benchPosition-1)%3 + 1, // 3 benches in a row
-				})
-
-				branchAllocated = true
-
-				// After seating 2 students per bench, move to the next bench
-				if len(roomsCapacity)%2 == 0 {
-					benchPosition++
-					if benchPosition > 3 {
-						benchPosition = 1
-						row++
+				// Allocate students from this branch to the current room sequentially
+				for i := 0; i < Min(len(students), totalBenches*2); i++ {
+					if totalBenches == 0 {
+						break
 					}
+
+					// Assign two distinct students to a bench
+					roomsCapacity = append(roomsCapacity, map[string]interface{}{
+						"student_id": students[i],
+						"row":        (len(roomsCapacity) / 3) + 1,
+						"bench":      (len(roomsCapacity) % 3) + 1,
+						"column":     (len(roomsCapacity) % 3) + 1, // 3 benches in a row
+					})
+
+					// Remove the assigned student from the list
+					remainingStudents[branch] = students[1:]
+
 					totalBenches--
+					if totalBenches == 0 {
+						break
+					}
+				}
+
+				// Break after assigning a single branch to this room
+				break
+			}
+		} else {
+			// Case 2: Assign students from multiple branches in a round-robin fashion
+			branchOrder := shuffleBranches(params.Branches)
+			if params.ShuffleYears && len(params.Years) > 1 {
+				branchOrder = shuffleBranchesWithYears(params.Branches, params.Years)
+			}
+
+			// Track current row and bench position
+			row, benchPosition := 1, 1
+
+			// Loop over each branch, ensuring different branches sit together
+			for totalBenches > 0 {
+				for _, branch := range branchOrder {
+					students := remainingStudents[branch]
+
+					if len(students) == 0 {
+						continue
+					}
+
+					// Assign one student from the current branch to the bench
+					roomsCapacity = append(roomsCapacity, map[string]interface{}{
+						"student_id": students[0],
+						"row":        row,
+						"bench":      benchPosition,
+						"column":     benchPosition,
+					})
+
+					// Remove the assigned student
+					remainingStudents[branch] = students[1:]
+
+					// Alternate to the next branch
+					if len(branchOrder) > 1 {
+						branchOrder = append(branchOrder[1:], branchOrder[0])
+					}
+
+					// Move to the next bench after assigning two students (1 from each branch)
+					if len(roomsCapacity)%2 == 0 {
+						benchPosition++
+						if benchPosition > 3 {
+							benchPosition = 1
+							row++
+						}
+						totalBenches--
+					}
+
+					if totalBenches == 0 {
+						break
+					}
 				}
 
 				if totalBenches == 0 {
 					break
 				}
 			}
-
-			// If no students were allocated, we are out of students to assign, so break out
-			if !branchAllocated {
-				break
-			}
 		}
 
+		// Assign to room if filled
 		if len(roomsCapacity) > 0 {
 			assignments = append(assignments, map[string]interface{}{
 				"room_id":       room.ID,
