@@ -2,11 +2,10 @@ package helpers
 
 import (
 	"DevMaan707/UMS/models"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"time"
-
-	"fmt"
 
 	"github.com/gin-gonic/gin"
 )
@@ -104,6 +103,7 @@ func generateStudentIDs(prefix, section string, capacity int) []string {
 	}
 	return studentIDs
 }
+
 func generateExamAssignments(assignType string, classes []models.Class, rooms []models.Room, params models.Params) []map[string]interface{} {
 	assignments := make([]map[string]interface{}, 0)
 	roomIndex := 0
@@ -125,15 +125,17 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 	roomsCapacity := make([][]map[string]interface{}, len(rooms))
 
 	for roomIndex < len(rooms) {
-		roomCapacity := rooms[roomIndex].Capacity
-		if rooms[roomIndex].RoomType == "classroom" && params.SingleChild {
-			roomCapacity /= 2
+		room := rooms[roomIndex]
+		// Dynamically calculate the number of benches based on the room's original capacity
+		examCapacity := room.Capacity * 2 / 3 // Convert normal capacity (3 per bench) to exam capacity (2 per bench)
+		totalBenches := examCapacity / 2      // Each bench holds 2 students during exams
+
+		if params.SingleChild {
+			totalBenches /= 2 // Reduce benches by half if SingleChild is true
 		}
 
-		// Calculate number of benches based on room capacity
-		//totalBenches := roomCapacity / 2
 		allocatedBranches := make(map[string]bool)
-		studentsPerBranch := roomCapacity / params.NumberOfBranchesInRoom
+		studentsPerBranch := examCapacity / params.NumberOfBranchesInRoom
 
 		// Shuffle branches if necessary
 		branchOrder := shuffleBranches(params.Branches)
@@ -141,15 +143,15 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 			branchOrder = shuffleBranchesWithYears(params.Branches, params.Years)
 		}
 
-		// Track current row and column
-		row, column := 1, 1
+		// Track current row and bench position
+		row, benchPosition := 1, 1
 
 		// Loop over each branch
 		for _, branch := range branchOrder {
 			students := remainingStudents[branch]
 
 			// Only assign students if we haven't exceeded room capacity
-			if roomCapacity == 0 || len(allocatedBranches) >= params.NumberOfBranchesInRoom {
+			if totalBenches == 0 || len(allocatedBranches) >= params.NumberOfBranchesInRoom {
 				break
 			}
 			if len(students) == 0 {
@@ -160,42 +162,44 @@ func generateExamAssignments(assignType string, classes []models.Class, rooms []
 			allocatedBranches[branch] = true
 
 			for i := 0; i < numToAllocate; i++ {
-				// Assign the student to a bench and column
+				// Assign students to benches in pairs
 				roomsCapacity[roomIndex] = append(roomsCapacity[roomIndex], map[string]interface{}{
 					"student_id": students[i],
 					"row":        row,
-					"column":     column,
+					"bench":      benchPosition,
+					"column":     (benchPosition-1)%3 + 1, // 3 benches in a row
 				})
 
-				// Move to the next seat in the room
-				column++
-				if column > 3 { // After 3 columns, move to the next row
-					column = 1
-					row++
+				// Once 2 students are assigned to a bench, move to the next bench
+				if i%2 == 1 {
+					benchPosition++
+					if benchPosition > 3 { // After 3 benches (3 columns), move to the next row
+						benchPosition = 1
+						row++
+					}
 				}
 			}
 
 			remainingStudents[branch] = students[numToAllocate:]
-			roomCapacity -= numToAllocate
+			totalBenches -= numToAllocate / 2
 		}
 
-		// Ensure all benches are filled according to the rules
-		fillBenchesWithDifferentBranches(roomsCapacity[roomIndex], params.NumberOfBranchesInRoom)
+		// Shuffle and alternate students from different branches in the same bench if necessary
+		if params.NumberOfBranchesInRoom > 1 {
+			fillBenchesWithDifferentBranches(roomsCapacity[roomIndex], params.NumberOfBranchesInRoom)
+		}
+
+		// Assign to room if filled
+		if len(roomsCapacity[roomIndex]) > 0 {
+			assignments = append(assignments, map[string]interface{}{
+				"room_id":       room.ID,
+				"room_number":   room.RoomNumber,
+				"assigned_to":   roomsCapacity[roomIndex],
+				"assigned_room": room.RoomNumber,
+			})
+		}
 
 		roomIndex++
-	}
-
-	// Create assignment output, excluding empty rooms
-	for i, room := range roomsCapacity {
-		if len(room) > 0 { // Only include rooms with assigned students
-			assignment := map[string]interface{}{
-				"room_id":       rooms[i].ID,
-				"room_number":   rooms[i].RoomNumber,
-				"assigned_to":   room,
-				"assigned_room": rooms[i].RoomNumber,
-			}
-			assignments = append(assignments, assignment)
-		}
 	}
 
 	return assignments
