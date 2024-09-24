@@ -1,0 +1,54 @@
+Features to include:
+    Auth, jwt token and verification
+    add rooms , add classes , get room details , assign rooms to classes , and assign exam rooms to students
+
+
+Database Schema
+
+    Class Table:
+        class_id: Unique identifier for each class
+        class_name: Name of the class
+        member_ids: List of student IDs (can be a JSON array)
+        year: Current year of the class
+        detained_list: List of detained student IDs (can be a JSON array)
+
+    Room Table:
+        room_id: Unique identifier for each room
+        room_type: Type of room (e.g., "classroom", "lab")
+        seats: Number of seats in the room
+        room_number: Room number or name
+        room_timetable: Timetable for the room (can be a JSON object with time slots)
+
+    Assigned Table:
+        assignment_id: Unique identifier for each assignment
+        class_id: ID of the class assigned to the room
+        room_id: ID of the room assigned to the class
+        year: Year of the assignment
+
+    ExamAssignment Table:
+        exam_assignment_id: Unique identifier for each exam assignment
+        exam_id: ID of the exam
+        room_id: ID of the room assigned for the exam
+        student_id: ID of the student assigned to the room
+        seat_number: Seat number assigned to the student
+
+Optimization Strategies
+
+    Efficient Data Storage:
+        Use JSON or arrays for storing lists of IDs (member_ids, detained_list) in the Class table to minimize the number of join operations.
+        Normalize the data where possible but denormalize selectively to improve read performance.
+
+    Indexing:
+        Create indexes on frequently queried fields such as class_id, room_id, and year to speed up lookup operations.
+
+    Batch Processing:
+        Use batch processing for assigning rooms and students to rooms to improve performance. For example, process multiple assignments in a single transaction.
+
+    Concurrency Control:
+        Implement concurrency control mechanisms to handle simultaneous updates, especially during the assignment of rooms and students to avoid conflicts.
+
+    Caching:
+        Use caching for frequently accessed data, such as room availability and class information, to reduce database load.
+
+    Database Partitioning:
+        If the dataset is large, consider partitioning the database tables by year or another relevant dimension to improve query performance.
