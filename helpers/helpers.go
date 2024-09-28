@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,12 +27,6 @@ type Class struct {
 	Year       int      `json:"year"`
 	Branch     string   `json:"branch"`
 	StudentIDs []string `json:"student_ids"`
-}
-
-type Bench struct {
-	Row    int    `json:"row"`
-	Column int    `json:"column"`
-	Side   string `json:"side"`
 }
 
 func GenerateTestData() (map[string][]Room, map[string][]Class) {
@@ -132,7 +127,6 @@ func AssignRoomsForExams(c *gin.Context) {
 		}
 	}
 
-	// Shuffle students if internal_shuffle is true
 	if params.InternalShuffle {
 		for branch := range selectedStudents {
 			rand.Seed(time.Now().UnixNano())
@@ -165,6 +159,9 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 		totalBenches := room.Rows * room.Columns
 		assignedStudents := []map[string]interface{}{}
 		benchIndex := 0
+		sections := map[string]int{}
+		years := map[int]int{}
+		totalStudents := 0
 
 		if params.NumberOfBranchesInRoom == 1 {
 			currentBranch := ""
@@ -194,6 +191,14 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 					students[currentBranch] = students[currentBranch][1:]
 					remainingStudents[currentBranch]--
 
+					year := extractYear(studentID)
+					section := extractSection(studentID)
+
+					// Update counts
+					years[year]++
+					sections[section]++
+					totalStudents++
+
 					assignedStudents = append(assignedStudents, map[string]interface{}{
 						"student_id": studentID,
 						"row":        row,
@@ -206,6 +211,13 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 					studentID := students[currentBranch][0]
 					students[currentBranch] = students[currentBranch][1:]
 					remainingStudents[currentBranch]--
+
+					year := extractYear(studentID)
+					section := extractSection(studentID)
+
+					years[year]++
+					sections[section]++
+					totalStudents++
 
 					assignedStudents = append(assignedStudents, map[string]interface{}{
 						"student_id": studentID,
@@ -245,6 +257,13 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 					students[branchA] = students[branchA][1:]
 					remainingStudents[branchA]--
 
+					year := extractYear(studentID)
+					section := extractSection(studentID)
+
+					years[year]++
+					sections[section]++
+					totalStudents++
+
 					assignedStudents = append(assignedStudents, map[string]interface{}{
 						"student_id": studentID,
 						"row":        row,
@@ -252,12 +271,10 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 						"side":       "left",
 					})
 				}
-
 				branchIndex++
 				if branchIndex >= len(branchOrder) {
 					branchIndex = 0
 				}
-
 				for branchIndex < len(branchOrder) && remainingStudents[branchOrder[branchIndex]] == 0 {
 					branchIndex++
 				}
@@ -269,6 +286,13 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 						studentID := students[branchB][0]
 						students[branchB] = students[branchB][1:]
 						remainingStudents[branchB]--
+
+						year := extractYear(studentID)
+						section := extractSection(studentID)
+
+						years[year]++
+						sections[section]++
+						totalStudents++
 
 						assignedStudents = append(assignedStudents, map[string]interface{}{
 							"student_id": studentID,
@@ -285,9 +309,12 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 
 		if len(assignedStudents) > 0 {
 			assignments = append(assignments, map[string]interface{}{
-				"room_id":     room.ID,
-				"room_number": room.RoomNumber,
-				"assigned_to": assignedStudents,
+				"room_id":        room.ID,
+				"room_number":    room.RoomNumber,
+				"total_students": totalStudents,
+				"sections":       sections,
+				"years":          years,
+				"assigned_to":    assignedStudents,
 			})
 		}
 
@@ -295,6 +322,20 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 	}
 
 	return assignments
+}
+
+func extractYear(studentID string) int {
+	yearStr := studentID[:2]
+	year, err := strconv.Atoi(yearStr)
+	if err != nil {
+		return 0
+	}
+	return year
+}
+
+func extractSection(studentID string) string {
+
+	return string(studentID[7])
 }
 
 func contains(slice []string, item string) bool {
