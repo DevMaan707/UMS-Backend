@@ -81,7 +81,8 @@ type Params struct {
 	SingleChild            bool     `json:"single_child"`
 	NumberOfBranchesInRoom int      `json:"number_of_branches"`
 	RoomTypes              []string `json:"room_types"`
-	ShuffleYears           bool     `json:"shuffle_years"`
+	InternalShuffle        bool     `json:"internal_shuffle"`
+	RowWise                bool     `json:"row_wise"`
 }
 
 type Details struct {

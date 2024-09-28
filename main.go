@@ -15,7 +15,7 @@ func main() {
 	// })
 
 	router.POST("/test/generate-classes", func(c *gin.Context) {
-		helpers.GenerateClassesTest(c)
+		helpers.AssignRoomsForExams(c)
 	})
 	router.Run()
 }
