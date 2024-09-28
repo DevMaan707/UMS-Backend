@@ -83,6 +83,8 @@ type Params struct {
 	RoomTypes              []string `json:"room_types"`
 	InternalShuffle        bool     `json:"internal_shuffle"`
 	RowWise                bool     `json:"row_wise"`
+	TOE                    string   `json:"toe"`
+	DOE                    string   `json:"doe"`
 }
 
 type Details struct {

@@ -29,6 +29,8 @@ type Class struct {
 	StudentIDs []string `json:"student_ids"`
 }
 
+var assignments []map[string]interface{} // Stores all assignments globally
+
 func GenerateTestData() (map[string][]Room, map[string][]Class) {
 	const numRows = 8
 	const numColumns = 3
@@ -107,6 +109,20 @@ func AssignRoomsForExams(c *gin.Context) {
 		return
 	}
 
+	// Parse Time of Exam (TOE)
+	toe, err := time.Parse(time.RFC3339, params.TOE)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Time of Exam format"})
+		return
+	}
+
+	// Parse Duration of Exam (DOE)
+	doe, err := time.ParseDuration(params.DOE)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Duration of Exam format"})
+		return
+	}
+
 	blocks, classes := GenerateTestData()
 
 	selectedRooms := []Room{}
@@ -136,7 +152,7 @@ func AssignRoomsForExams(c *gin.Context) {
 		}
 	}
 
-	assignments := generateExamAssignments("exam", selectedRooms, selectedStudents, params)
+	assignments = generateExamAssignments("exam", selectedRooms, selectedStudents, params, toe, doe)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Exam Room Assignments",
@@ -144,7 +160,7 @@ func AssignRoomsForExams(c *gin.Context) {
 	})
 }
 
-func generateExamAssignments(assignType string, rooms []Room, students map[string][]string, params models.Params) []map[string]interface{} {
+func generateExamAssignments(assignType string, rooms []Room, students map[string][]string, params models.Params, toe time.Time, doe time.Duration) []map[string]interface{} {
 	assignments := make([]map[string]interface{}, 0)
 	roomIndex := 0
 
@@ -194,7 +210,6 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 					year := extractYear(studentID)
 					section := extractSection(studentID)
 
-					// Update counts
 					years[year]++
 					sections[section]++
 					totalStudents++
@@ -204,6 +219,8 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 						"row":        row,
 						"column":     column,
 						"side":       "left",
+						"toe":        toe.Format(time.RFC3339),
+						"doe":        doe.String(),
 					})
 				}
 
@@ -224,6 +241,8 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 						"row":        row,
 						"column":     column,
 						"side":       "right",
+						"toe":        toe.Format(time.RFC3339),
+						"doe":        doe.String(),
 					})
 				}
 
@@ -269,6 +288,8 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 						"row":        row,
 						"column":     column,
 						"side":       "left",
+						"toe":        toe.Format(time.RFC3339),
+						"doe":        doe.String(),
 					})
 				}
 				branchIndex++
@@ -299,6 +320,8 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 							"row":        row,
 							"column":     column,
 							"side":       "right",
+							"toe":        toe.Format(time.RFC3339),
+							"doe":        doe.String(),
 						})
 					}
 				}
@@ -314,6 +337,8 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 				"total_students": totalStudents,
 				"sections":       sections,
 				"years":          years,
+				"toe":            toe.Format(time.RFC3339),
+				"doe":            doe.String(),
 				"assigned_to":    assignedStudents,
 			})
 		}
@@ -334,7 +359,6 @@ func extractYear(studentID string) int {
 }
 
 func extractSection(studentID string) string {
-
 	return string(studentID[7])
 }
 
@@ -354,4 +378,59 @@ func containsInt(slice []int, item int) bool {
 		}
 	}
 	return false
+}
+
+// GetAllAssignments returns all assignments for a particular TOE
+func GetAllAssignments(c *gin.Context) {
+	toeStr := c.Query("toe")
+	toe, err := time.Parse(time.RFC3339, toeStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Time of Exam format"})
+		return
+	}
+
+	filteredAssignments := []map[string]interface{}{}
+	for _, assignment := range assignments {
+		if assignment["toe"] == toe.Format(time.RFC3339) {
+			filteredAssignments = append(filteredAssignments, assignment)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"assignments": filteredAssignments,
+	})
+}
+
+// GetStudentSpecificAssignment returns the room assignment for a student at a particular TOE
+func GetStudentSpecificAssignment(c *gin.Context) {
+	toeStr := c.Query("toe")
+	studentID := c.Param("student_id")
+	toe, err := time.Parse(time.RFC3339, toeStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Time of Exam format"})
+		return
+	}
+
+	var roomAssignment string
+	for _, assignment := range assignments {
+		if assignment["toe"] == toe.Format(time.RFC3339) {
+			for _, student := range assignment["assigned_to"].([]map[string]interface{}) {
+				if student["student_id"] == studentID {
+					roomAssignment = assignment["room_number"].(string)
+					break
+				}
+			}
+		}
+		if roomAssignment != "" {
+			break
+		}
+	}
+
+	if roomAssignment == "" {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Assignment not found"})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"room_number": roomAssignment,
+		})
+	}
 }
