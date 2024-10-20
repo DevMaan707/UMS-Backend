@@ -2,13 +2,16 @@ package helpers
 
 import (
 	"DevMaan707/UMS/models"
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"math/rand"
-	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/jung-kurt/gofpdf"
 )
 
 type Room struct {
@@ -29,7 +32,29 @@ type Class struct {
 	StudentIDs []string `json:"student_ids"`
 }
 
-var assignments []map[string]interface{} // Stores all assignments globally
+func LogAssignments(assignments []map[string]interface{}, logFileName string, toe time.Time) error {
+	file, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("error opening log file: %w", err)
+	}
+	defer file.Close()
+	logEntry := map[string]interface{}{
+		"time":        toe.Format(time.RFC3339),
+		"room":        assignments[0]["room"],
+		"assignments": assignments,
+	}
+
+	entryData, err := json.Marshal(logEntry)
+	if err != nil {
+		return fmt.Errorf("error marshalling log entry to JSON: %w", err)
+	}
+
+	if _, err := file.Write(append(entryData, '\n')); err != nil {
+		return fmt.Errorf("error writing to log file: %w", err)
+	}
+
+	return nil
+}
 
 func GenerateTestData() (map[string][]Room, map[string][]Class) {
 	const numRows = 8
@@ -102,65 +127,7 @@ func generateStudentIDs(prefix, section string, capacity int) []string {
 	return studentIDs
 }
 
-func AssignRoomsForExams(c *gin.Context) {
-	var params models.Params
-	if err := c.ShouldBindJSON(&params); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-		return
-	}
-
-	// Parse Time of Exam (TOE)
-	toe, err := time.Parse(time.RFC3339, params.TOE)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Time of Exam format"})
-		return
-	}
-
-	// Parse Duration of Exam (DOE)
-	doe, err := time.ParseDuration(params.DOE)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Duration of Exam format"})
-		return
-	}
-
-	blocks, classes := GenerateTestData()
-
-	selectedRooms := []Room{}
-	for _, block := range params.Blocks {
-		if rooms, found := blocks[block]; found {
-			selectedRooms = append(selectedRooms, rooms...)
-		}
-	}
-
-	selectedStudents := make(map[string][]string)
-	for _, branch := range params.Branches {
-		if branchClasses, found := classes[branch]; found {
-			for _, class := range branchClasses {
-				if containsInt(params.Years, class.Year) {
-					selectedStudents[branch] = append(selectedStudents[branch], class.StudentIDs...)
-				}
-			}
-		}
-	}
-
-	if params.InternalShuffle {
-		for branch := range selectedStudents {
-			rand.Seed(time.Now().UnixNano())
-			rand.Shuffle(len(selectedStudents[branch]), func(i, j int) {
-				selectedStudents[branch][i], selectedStudents[branch][j] = selectedStudents[branch][j], selectedStudents[branch][i]
-			})
-		}
-	}
-
-	assignments = generateExamAssignments("exam", selectedRooms, selectedStudents, params, toe, doe)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":     "Exam Room Assignments",
-		"assignments": assignments,
-	})
-}
-
-func generateExamAssignments(assignType string, rooms []Room, students map[string][]string, params models.Params, toe time.Time, doe time.Duration) []map[string]interface{} {
+func GenerateExamAssignments(assignType string, rooms []Room, students map[string][]string, params models.Params, toe time.Time, doe time.Duration) []map[string]interface{} {
 	assignments := make([]map[string]interface{}, 0)
 	roomIndex := 0
 
@@ -330,107 +297,208 @@ func generateExamAssignments(assignType string, rooms []Room, students map[strin
 			}
 		}
 
-		if len(assignedStudents) > 0 {
-			assignments = append(assignments, map[string]interface{}{
-				"room_id":        room.ID,
-				"room_number":    room.RoomNumber,
-				"total_students": totalStudents,
-				"sections":       sections,
-				"years":          years,
-				"toe":            toe.Format(time.RFC3339),
-				"doe":            doe.String(),
-				"assigned_to":    assignedStudents,
-			})
-		}
-
 		roomIndex++
+		assignments = append(assignments, map[string]interface{}{
+			"room":        room.RoomNumber,
+			"assignments": assignedStudents,
+		})
+	}
+	logFileName := "exam_assignments.log"
+	err := LogAssignments(assignments, logFileName, toe)
+	if err != nil {
+		fmt.Printf("Failed to log assignments: %v\n", err)
 	}
 
 	return assignments
 }
 
 func extractYear(studentID string) int {
-	yearStr := studentID[:2]
-	year, err := strconv.Atoi(yearStr)
-	if err != nil {
-		return 0
-	}
+	year, _ := strconv.Atoi(string(studentID[0:2]))
 	return year
 }
 
 func extractSection(studentID string) string {
-	return string(studentID[7])
+	return string(studentID[2])
 }
 
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
+type ExamAssignment struct {
+	StudentID  string
+	RoomNumber string
+	TOE        time.Time
+}
+
+var Assignments []ExamAssignment
+
+func FindStudentAssignment(assignments []ExamAssignment, studentID string, toe time.Time) string {
+	for _, assignment := range assignments {
+		if assignment.StudentID == studentID && assignment.TOE.Equal(toe) {
+			return assignment.RoomNumber
+		}
+	}
+	return ""
+}
+
+func FilterAssignmentsByTOE(assignments []ExamAssignment, toe time.Time) []ExamAssignment {
+	filtered := []ExamAssignment{}
+	for _, assignment := range assignments {
+		if assignment.TOE.Equal(toe) {
+			filtered = append(filtered, assignment)
+		}
+	}
+	return filtered
+}
+
+func ShuffleStudents(students map[string][]string) {
+	rand.Seed(time.Now().UnixNano())
+	for branch := range students {
+		rand.Shuffle(len(students[branch]), func(i, j int) {
+			students[branch][i], students[branch][j] = students[branch][j], students[branch][i]
+		})
+	}
+}
+
+func ContainsInt(slice []int, value int) bool {
+	for _, v := range slice {
+		if v == value {
 			return true
 		}
 	}
 	return false
 }
-
-func containsInt(slice []int, item int) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-// GetAllAssignments returns all assignments for a particular TOE
-func GetAllAssignments(c *gin.Context) {
-	toeStr := c.Query("toe")
-	toe, err := time.Parse(time.RFC3339, toeStr)
+func FetchAssignmentsByTime(targetTime time.Time) ([]map[string]interface{}, error) {
+	file, err := os.Open("exam_assignments.log")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Time of Exam format"})
-		return
+		return nil, fmt.Errorf("error opening log file: %w", err)
 	}
+	defer file.Close()
 
-	filteredAssignments := []map[string]interface{}{}
-	for _, assignment := range assignments {
-		if assignment["toe"] == toe.Format(time.RFC3339) {
-			filteredAssignments = append(filteredAssignments, assignment)
+	var assignments []map[string]interface{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		var logEntry map[string]interface{}
+		err := json.Unmarshal([]byte(line), &logEntry)
+		if err != nil {
+			return nil, fmt.Errorf("error unmarshalling JSON: %w", err)
 		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"assignments": filteredAssignments,
-	})
-}
-
-// GetStudentSpecificAssignment returns the room assignment for a student at a particular TOE
-func GetStudentSpecificAssignment(c *gin.Context) {
-	toeStr := c.Query("toe")
-	studentID := c.Param("student_id")
-	toe, err := time.Parse(time.RFC3339, toeStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Time of Exam format"})
-		return
-	}
-
-	var roomAssignment string
-	for _, assignment := range assignments {
-		if assignment["toe"] == toe.Format(time.RFC3339) {
-			for _, student := range assignment["assigned_to"].([]map[string]interface{}) {
-				if student["student_id"] == studentID {
-					roomAssignment = assignment["room_number"].(string)
-					break
+		if logTimeStr, exists := logEntry["time"]; exists {
+			logTime, err := time.Parse(time.RFC3339, logTimeStr.(string))
+			if err == nil && logTime.Equal(targetTime) {
+				if assignmentArray, exists := logEntry["assignments"]; exists {
+					if assignmentsList, ok := assignmentArray.([]interface{}); ok {
+						for _, assign := range assignmentsList {
+							if assignmentMap, ok := assign.(map[string]interface{}); ok {
+								assignments = append(assignments, assignmentMap)
+							}
+						}
+					}
 				}
 			}
 		}
-		if roomAssignment != "" {
-			break
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading from file: %w", err)
+	}
+
+	return assignments, nil
+}
+
+type StudentAssignmentResponse struct {
+	RoomNumber string `json:"room_number"`
+	Details    string `json:"details"`
+	Toe        string `json:"toe"`
+	Block      string `json:"block"`
+}
+
+func GetStudentAssignment(studentID string, toe time.Time) (StudentAssignmentResponse, error) {
+	assignments, err := FetchAssignmentsByTime(toe)
+	if err != nil {
+		return StudentAssignmentResponse{}, err
+	}
+	for _, assignment := range assignments {
+		if innerAssignments, exists := assignment["assignments"]; exists {
+			if assignmentList, ok := innerAssignments.([]interface{}); ok {
+				for _, assign := range assignmentList {
+					assignmentData, ok := assign.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					if assignmentData["student_id"] == studentID {
+						if assignmentToeStr, exists := assignmentData["toe"]; exists {
+							if assignmentToeStr == toe.Format(time.RFC3339) {
+								row, rowOk := assignmentData["row"].(float64)
+								side, sideOk := assignmentData["side"].(string)
+
+								if rowOk && sideOk {
+									response := StudentAssignmentResponse{
+										RoomNumber: assignment["room"].(string),
+										Details:    fmt.Sprintf("%s - Row: %d", side, int(row)),
+										Toe:        assignmentToeStr.(string),
+										Block:      "",
+									}
+									return response, nil
+								} else {
+									return StudentAssignmentResponse{}, fmt.Errorf("invalid row or side format for student %s", studentID)
+								}
+							}
+						} else {
+							return StudentAssignmentResponse{}, fmt.Errorf("toe field not found for student %s", studentID)
+						}
+					}
+				}
+			}
 		}
 	}
 
-	if roomAssignment == "" {
-		c.JSON(http.StatusNotFound, gin.H{"message": "Assignment not found"})
-	} else {
-		c.JSON(http.StatusOK, gin.H{
-			"room_number": roomAssignment,
-		})
+	return StudentAssignmentResponse{}, fmt.Errorf("no assignment found for student %s at time %s", studentID, toe.Format(time.RFC3339))
+}
+func GeneratePDF(assignments []map[string]interface{}) (string, error) {
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetFont("Arial", "B", 16)
+
+	shiftRight := 8.0
+
+	for _, assignment := range assignments {
+		roomNumber := assignment["room"].(string)
+		pdf.AddPage()
+
+		pdf.CellFormat(0, 10, "Room: "+roomNumber, "", 1, "C", false, 0, "")
+
+		if assignmentList, ok := assignment["assignments"].([]interface{}); ok {
+			const (
+				benchWidth  = 60.0
+				benchHeight = 15.0
+				padding     = 5.0
+			)
+
+			for _, assign := range assignmentList {
+				assignMap := assign.(map[string]interface{})
+				studentID := assignMap["student_id"].(string)
+				row := assignMap["row"].(float64)
+				column := assignMap["column"].(float64)
+				side := assignMap["side"].(string)
+
+				xPosition := shiftRight + (benchWidth+padding)*(column-1)
+				yPosition := float64(row) * 20
+
+				pdf.Rect(xPosition, yPosition, benchWidth, benchHeight, "D")
+				pdf.SetFont("Arial", "B", 10)
+
+				if side == "left" {
+					pdf.Text(xPosition+5, yPosition+10, studentID)
+				} else if side == "right" {
+					pdf.Text(xPosition+benchWidth/2+5, yPosition+10, studentID)
+				}
+			}
+		}
 	}
+
+	pdfFilePath := "assignments.pdf"
+	err := pdf.OutputFileAndClose(pdfFilePath)
+	if err != nil {
+		return "", err
+	}
+
+	return pdfFilePath, nil
 }
